@@ -10,6 +10,22 @@ from collections import defaultdict
 RATE_BY_TIPE = {'75': 450000, '200': 800000}
 WAGE_PER_HOUR = 40000
 
+# A shift cannot outlast a calendar day. The longest real shift in the log so far
+# is 22 h, so 24 leaves headroom without swallowing a genuine 240 h typo.
+MAX_SHIFT_HOURS = 24
+# Consecutive shifts on a healthy unit close and open on the exact same reading
+# (83 of 91 transitions do). Anything above this is a real gap, not rounding.
+HM_GAP_SLACK = 0
+# Below this a forward gap is a stray hour rather than a whole missing shift.
+HM_GAP_ALERT = 2
+
+
+def fmt_h(v):
+    """Render an hour count without a pointless trailing .0."""
+    if isinstance(v, float) and v == int(v):
+        v = int(v)
+    return '{:,}'.format(v)
+
 PROBLEM_WORDS = ['rusak', 'pecah', 'putus', 'bocor', 'trouble', 'ambles', 'amblas', 'macet',
                  'patah', 'error', 'gagal', 'mogok', 'tunggu', 'nyalep', 'selang hos', 'vanbelt',
                  'terjebak', 'anjlok', 'terguling', 'tergelincir', 'hilang', 'hancur',
@@ -178,26 +194,95 @@ def build(raw_a, fleet):
         byunit[rec['kode_pc']].append(rec)
 
     for kode, recs in byunit.items():
+        reg_name = by_kode.get(kode, {}).get('Operator BERJALAN', '').strip()
+        registered = reg_name.lower()
+
         # Walk the log in DATE order. Sorting by hm_start instead lets a mistyped
         # reading sort into the wrong place, which flags its innocent neighbours
         # and hides the entry that is actually wrong.
-        registered = by_kode.get(kode, {}).get('Operator BERJALAN', '').strip().lower()
-        prev_end = None
+        prev = None
         for rec in sorted([x for x in recs if x['hm_start'] is not None],
                           key=lambda x: x['date']):
-            if prev_end is not None and abs(rec['hm_start'] - prev_end) > 5:
-                rec['anomalies'].append('hm_discontinuity')
+            if prev is not None:
+                gap = rec['hm_start'] - prev['hm_end']
+                if gap > HM_GAP_SLACK:
+                    # The meter ran while nobody filed a report for it.
+                    rec['anomalies'].append({
+                        'code': 'missing_report',
+                        'severity': 'alert' if gap > HM_GAP_ALERT else 'info',
+                        'hours': gap,
+                        'ref_date': prev['date'],
+                        'title': '%s h missing between shifts' % fmt_h(gap),
+                        # {d} is filled in by the page so dates format one way only.
+                        'msg': '{d} closed at HM %s, but this shift opens at HM %s. '
+                               'Those %s h ran with no report filed.'
+                               % (fmt_h(prev['hm_end']), fmt_h(rec['hm_start']), fmt_h(gap)),
+                    })
+                elif gap < -HM_GAP_SLACK:
+                    # An hour meter only counts up, so this is a typo or wrong unit.
+                    rec['anomalies'].append({
+                        'code': 'hm_backwards',
+                        'severity': 'alert',
+                        'ref_date': prev['date'],
+                        'title': 'Meter went backwards %s h' % fmt_h(-gap),
+                        'msg': 'This shift opens at HM %s, below the HM %s that {d} '
+                               'closed at. An hour meter cannot count down — check for a '
+                               'mistyped digit or the wrong unit on the form.'
+                               % (fmt_h(rec['hm_start']), fmt_h(prev['hm_end'])),
+                    })
             if rec['hm_end'] is not None:
-                prev_end = rec['hm_end']
+                prev = rec
+
         for rec in recs:
-            if rec['hours'] > 24:
-                rec['anomalies'].append('improbable_duration')
-            if rec['hours'] < 0:
-                rec['anomalies'].append('negative_hours')
+            span = None
+            if rec['hm_start'] is not None and rec['hm_end'] is not None:
+                span = rec['hm_end'] - rec['hm_start']
+            longest = max(rec['hours'], span) if span is not None else rec['hours']
+
+            if longest > MAX_SHIFT_HOURS:
+                rec['anomalies'].append({
+                    'code': 'impossible_shift',
+                    'severity': 'alert',
+                    'title': '%s h in a single shift' % fmt_h(longest),
+                    'msg': '%s h is longer than a calendar day. An excavator cannot run '
+                           'this long unbroken — the start or end reading is almost '
+                           'certainly mistyped.' % fmt_h(longest),
+                })
+            if span is not None and span < 0:
+                rec['anomalies'].append({
+                    'code': 'negative_shift',
+                    'severity': 'alert',
+                    'title': 'Shift ends below its own start',
+                    'msg': 'Closes at HM %s but opened at HM %s.'
+                           % (fmt_h(rec['hm_end']), fmt_h(rec['hm_start'])),
+                })
+            elif rec['hours'] < 0:
+                rec['anomalies'].append({
+                    'code': 'negative_shift',
+                    'severity': 'alert',
+                    'title': 'Negative hours reported',
+                    'msg': 'Reported total is %s h.' % fmt_h(rec['hours']),
+                })
+            if span is not None and abs(span - rec['hours']) > 0.5:
+                rec['anomalies'].append({
+                    'code': 'hours_mismatch',
+                    'severity': 'alert',
+                    'title': 'Reported hours disagree with the meter',
+                    'msg': 'Reported %s h, but the meter moved %s h (HM %s → %s).'
+                           % (fmt_h(rec['hours']), fmt_h(span),
+                              fmt_h(rec['hm_start']), fmt_h(rec['hm_end'])),
+                })
             # A shift logged against a unit by someone other than its running
             # operator is usually the wrong unit picked on the form.
             if registered and rec['operator'].strip().lower() != registered:
-                rec['anomalies'].append('operator_mismatch')
+                rec['anomalies'].append({
+                    'code': 'operator_mismatch',
+                    'severity': 'alert',
+                    'title': 'Logged by a different operator',
+                    'msg': 'Filed by %s, but %s is the running operator for this unit. '
+                           'The wrong unit may have been picked on the form.'
+                           % (rec['operator'] or '—', reg_name or '—'),
+                })
             rec['is_anomaly'] = bool(rec['anomalies'])
 
     units = {}
