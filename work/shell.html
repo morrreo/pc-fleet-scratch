@@ -138,6 +138,57 @@ h1,h2,h3,.disp{ font-family:"Oswald",sans-serif; text-transform:uppercase; lette
 .alert-hm{ font-family:"IBM Plex Mono",monospace; font-weight:600; color:var(--ink); }
 .alert-empty{ padding:20px; text-align:center; color:var(--good); background:var(--good-soft); border-radius:8px; font-size:13px; font-weight:600; }
 
+/* ============ FLEET INFOGRAPHIC ============ */
+.ig-legend{ display:flex; gap:14px; flex-wrap:wrap; align-items:center; margin-bottom:4px; }
+.ig-key{ display:inline-flex; align-items:center; gap:6px; font-size:11px; color:var(--ink-2); }
+.ig-key i{ width:10px; height:10px; border-radius:3px; display:inline-block; flex:none; }
+
+.ig-unit{ display:grid; grid-template-columns:190px 104px minmax(0,1fr); gap:18px;
+  align-items:center; padding:15px 0; border-top:1px solid var(--border); }
+.ig-unit:first-child{ border-top:0; padding-top:6px; }
+.ig-id{ min-width:0; }
+.ig-id .u-code{ font-size:14px; }
+.ig-sub{ font-size:11px; color:var(--ink-muted); margin-top:3px; }
+.ig-op{ font-size:11.5px; color:var(--ink-2); margin-top:5px; }
+/* Proportional figures: tabular-nums makes a display-size number look loose. */
+.ig-hero{ font-size:27px; font-weight:700; line-height:1; color:var(--ink); letter-spacing:-.02em; }
+.ig-hero em{ font-style:normal; font-size:13px; font-weight:600; color:var(--ink-muted); margin-left:3px; }
+.ig-heronote{ font-size:11px; color:var(--ink-muted); margin-top:5px; line-height:1.4; }
+.ig-plot{ min-width:0; }
+/* 2px flex gap = the surface gap between adjacent columns; no strokes on marks. */
+.ig-bars{ display:flex; align-items:flex-end; gap:2px; height:46px; }
+.ig-bar{ flex:1 1 0; min-width:0; height:100%; display:flex; align-items:flex-end; position:relative; }
+.ig-bar > i{ display:block; width:100%; max-width:24px; margin:0 auto; border-radius:4px 4px 0 0; }
+.ig-bar > b{ position:absolute; left:50%; transform:translateX(-50%); font-size:10px;
+  font-weight:600; color:var(--ink-2); white-space:nowrap; }
+.ig-baseline{ height:1px; background:var(--border-strong); margin-top:0; }
+.ig-mixrow{ display:flex; align-items:center; gap:9px; margin-top:9px; }
+.ig-mix{ display:flex; height:9px; flex:0 0 46%; min-width:0; gap:2px; }
+.ig-mix i{ display:block; height:100%; }
+.ig-mix i:first-child{ border-radius:4px 0 0 4px; }
+.ig-mix i:last-child{ border-radius:0 4px 4px 0; }
+.ig-mix i:only-child{ border-radius:4px; }
+.ig-mixlab{ font-size:10.5px; color:var(--ink-muted); min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.ig-axis{ display:flex; justify-content:space-between; font-size:10.5px; color:var(--ink-muted); margin-top:10px; }
+
+.ig-where{ margin-top:20px; padding-top:16px; border-top:1px solid var(--border); }
+.ig-wtitle{ font-size:12px; font-weight:600; color:var(--ink); text-transform:uppercase; letter-spacing:.06em; }
+.ig-wsub{ font-size:11.5px; color:var(--ink-muted); margin:3px 0 12px; }
+.ig-locs{ display:flex; flex-direction:column; gap:11px; }
+.ig-loc{ display:grid; grid-template-columns:minmax(120px,168px) minmax(0,1fr) auto; gap:12px; align-items:center; }
+.ig-locname{ font-size:12.5px; color:var(--ink); font-weight:600; }
+.ig-locchips{ display:flex; gap:5px; flex-wrap:wrap; margin-top:4px; }
+.ig-locchip{ display:inline-flex; align-items:center; gap:4px; font-size:10px;
+  font-family:"IBM Plex Mono",monospace; color:var(--ink-2); }
+.ig-locchip i{ width:7px; height:7px; border-radius:50%; display:inline-block; flex:none; }
+.ig-loctrack{ min-width:0; }
+.ig-locbar{ height:14px; border-radius:0 4px 4px 0; background:var(--accent); }
+.ig-locval{ font-size:11.5px; color:var(--ink-2); font-variant-numeric:tabular-nums; white-space:nowrap; }
+@media (max-width:840px){
+  .ig-unit{ grid-template-columns:1fr; gap:10px; }
+  .ig-loc{ grid-template-columns:1fr; gap:5px; }
+}
+
 /* ============ CHARTS ============ */
 .chart-row{ display:grid; grid-template-columns:1.3fr 1fr; gap:16px; }
 @media (max-width:1000px){ .chart-row{ grid-template-columns:1fr; } }
@@ -207,6 +258,10 @@ footer a{ color:var(--accent); }
         <label>Excavator (PC)</label>
         <select id="f-unit"><option value="all">All units</option></select>
       </div>
+      <div class="fgroup">
+        <label>Location</label>
+        <select id="f-location"><option value="all">All locations</option></select>
+      </div>
       <button class="btn-reset" id="f-reset">Reset filters</button>
     </div>
   </div>
@@ -222,6 +277,17 @@ footer a{ color:var(--accent); }
       <div class="alert-tally" id="alert-tally"></div>
     </div>
     <div id="alerts-list"></div>
+  </section>
+
+  <section class="card">
+    <div class="section-head">
+      <div>
+        <h2>🚜 Fleet at a Glance</h2>
+        <div class="card-sub">One row per excavator: its daily rhythm on a shared scale, the work it does, and the ground it covers. Everything here follows the filters above.</div>
+      </div>
+    </div>
+    <div class="ig-legend" id="ig-legend"></div>
+    <div id="ig-body"></div>
   </section>
 
   <section class="chart-row">
@@ -286,7 +352,8 @@ const BUNDLE = {"records": [{"submitted": "8/12/2026 18:25:30", "date": "2026-08
 
 const ALERT_LABEL = {
   missing_report:'missing report', hm_backwards:'meter backwards',
-  impossible_shift:'impossible shift', negative_shift:'negative shift',
+  impossible_shift:'impossible shift', impossible_day:'impossible day',
+  negative_shift:'negative shift',
   hours_mismatch:'hours mismatch', operator_mismatch:'wrong operator'
 };
 function esc(s){
@@ -375,10 +442,17 @@ class Dashboard{
       unitSel.appendChild(o);
     });
 
-    [from,to,opSel,unitSel].forEach(el=> el.addEventListener('change', ()=>this.applyFilters()));
+    const locSel = document.getElementById('f-location');
+    [...new Set(this.records.map(r=>r.lokasi).filter(Boolean))].sort()
+      .forEach(l=>{
+        const o = document.createElement('option'); o.value = l; o.textContent = l;
+        locSel.appendChild(o);
+      });
+
+    [from,to,opSel,unitSel,locSel].forEach(el=> el.addEventListener('change', ()=>this.applyFilters()));
     document.getElementById('f-reset').addEventListener('click', ()=>{
       from.value = this.b.meta.date_min; to.value = this.b.meta.date_max;
-      opSel.value='all'; unitSel.value='all';
+      opSel.value='all'; unitSel.value='all'; locSel.value='all';
       this.applyFilters();
     });
   }
@@ -388,10 +462,12 @@ class Dashboard{
     const to = document.getElementById('f-to').value;
     const op = document.getElementById('f-operator').value;
     const unit = document.getElementById('f-unit').value;
+    const loc = document.getElementById('f-location').value;
     return this.records.filter(r=>{
       if(r.date < from || r.date > to) return false;
       if(op!=='all' && r.operator!==op) return false;
       if(unit!=='all' && r.kode_pc!==unit) return false;
+      if(loc!=='all' && r.lokasi!==loc) return false;
       return true;
     });
   }
@@ -400,6 +476,7 @@ class Dashboard{
     this.filtered = this.getFiltered();
     this.renderKPIs();
     this.renderAlerts();
+    this.renderInfographic();
     try{ this.renderCharts(); }catch(e){ console.error('Chart render failed:', e); this.showChartFallback(); }
     this.renderIssues();
     this.renderTable();
@@ -482,6 +559,124 @@ class Dashboard{
         </div>
         <div class="alert-msg">${hlHm(esc(a.msg).replace('{d}', a.ref_date? fmtDate(a.ref_date) : ''))}</div>
       </div>`).join('') + '</div>';
+  }
+
+  /* ---------------- Fleet infographic ---------------- */
+  renderInfographic(){
+    const f = this.filtered;
+    const legend = document.getElementById('ig-legend');
+    const host = document.getElementById('ig-body');
+
+    if(!f.length){
+      legend.innerHTML = '';
+      host.innerHTML = '<div class="empty-note">No shifts match the current filters.</div>';
+      return;
+    }
+
+    const dates = [...new Set(f.map(r=>r.date))].sort();
+    const units = UNIT_ORDER.filter(u => f.some(r=>r.kode_pc===u));
+
+    const rows = units.map(u=>{
+      const rs = f.filter(r=>r.kode_pc===u);
+      const byDate = {}, mix = {};
+      rs.forEach(r=>{
+        byDate[r.date] = (byDate[r.date]||0) + (r.hours||0);
+        mix[r.job_category] = (mix[r.job_category]||0) + (r.hours||0);
+      });
+      return {u, rs, byDate, mix, total: rs.reduce((s,r)=>s+(r.hours||0),0)};
+    });
+    // One shared y-scale for every row, so the rows can honestly be compared.
+    const peak = Math.max(1, ...rows.map(r=>Math.max(0, ...dates.map(d=>r.byDate[d]||0))));
+
+    // Colours stay as var() rather than resolved hex so they follow the theme.
+    const cats = Object.keys(JOBCAT_COLOR).filter(c => f.some(r=>r.job_category===c));
+    legend.innerHTML = '<span class="ig-key">Work type</span>' + cats.map(c=>
+      `<span class="ig-key"><i style="background:${JOBCAT_COLOR[c]}"></i>${esc(c)}</span>`).join('');
+
+    let html = rows.map(row=>{
+      const color = UNIT_COLOR[row.u] || 'var(--ink-muted)';
+      const info = this.b.units[row.u] || {};
+      const dayMax = Math.max(0, ...dates.map(d=>row.byDate[d]||0));
+      const workedDays = dates.filter(d=>row.byDate[d]).length;
+
+      // Label only the peak column: a value on every bar goes unread.
+      let peakLabelled = false;
+      const bars = dates.map(d=>{
+        const h = row.byDate[d] || 0;
+        const pct = (h/peak)*100;
+        let lab = '';
+        if(!peakLabelled && h>0 && h===dayMax){
+          peakLabelled = true;
+          lab = `<b style="bottom:calc(${pct.toFixed(1)}% + 4px)">${fmtNum(h,1)} h</b>`;
+        }
+        return `<div class="ig-bar" title="${fmtDate(d)} · ${fmtNum(h,1)} h">${lab}`
+             + `<i style="height:${pct.toFixed(1)}%;background:${color}"></i></div>`;
+      }).join('');
+
+      const mixCats = Object.keys(row.mix).filter(c=>row.mix[c]>0)
+        .sort((a,b)=>row.mix[b]-row.mix[a]);
+      const mixTotal = mixCats.reduce((s,c)=>s+row.mix[c],0) || 1;
+      const mixBar = mixCats.map(c=>
+        `<i style="flex:${(row.mix[c]/mixTotal*100).toFixed(2)};background:${JOBCAT_COLOR[c]||'var(--j-other)'}"`
+        + ` title="${esc(c)} · ${fmtNum(row.mix[c],1)} h"></i>`).join('');
+      const topCat = mixCats[0];
+
+      return `
+      <div class="ig-unit">
+        <div class="ig-id">
+          <div><span class="u-swatch" style="background:${color}"></span><span class="u-code">${esc(row.u)}</span></div>
+          <div class="ig-sub">${esc(info.merek||'')} ${esc(info.tipe||'')}${info.spek? ' · '+esc(info.spek) : ''}</div>
+          <div class="ig-op">${esc(info.operator_current||'—')}</div>
+        </div>
+        <div>
+          <div class="ig-hero">${fmtNum(row.total,0)}<em>h</em></div>
+          <div class="ig-heronote">${row.rs.length} shifts · ${workedDays? fmtNum(row.total/workedDays,1) : '0'} h/day</div>
+        </div>
+        <div class="ig-plot">
+          <div class="ig-bars">${bars}</div>
+          <div class="ig-baseline"></div>
+          <div class="ig-mixrow">
+            <div class="ig-mix">${mixBar}</div>
+            <div class="ig-mixlab">${topCat? 'mostly '+esc(topCat)+' ('+Math.round(row.mix[topCat]/mixTotal*100)+'%)' : '—'}</div>
+          </div>
+        </div>
+      </div>`;
+    }).join('');
+
+    html += `<div class="ig-axis"><span>${fmtDate(dates[0])}</span>`
+          + `<span>shared scale · busiest day ${fmtNum(peak,1)} h</span>`
+          + `<span>${fmtDate(dates[dates.length-1])}</span></div>`;
+
+    // Sites are nominal, so every bar takes the same hue — a darker-where-bigger
+    // ramp would just re-encode the length it already shows.
+    const locH = {}, locUnits = {};
+    f.forEach(r=>{
+      const l = r.lokasi || '—';
+      locH[l] = (locH[l]||0) + (r.hours||0);
+      (locUnits[l] = locUnits[l] || new Set()).add(r.kode_pc);
+    });
+    const locs = Object.keys(locH).sort((a,b)=>locH[b]-locH[a]);
+    const locMax = Math.max(1, ...locs.map(l=>locH[l]));
+
+    html += `
+      <div class="ig-where">
+        <div class="ig-wtitle">Where the hours go</div>
+        <div class="ig-wsub">Total logged hours by site, and which excavators work each one.</div>
+        <div class="ig-locs">` + locs.map(l=>`
+          <div class="ig-loc">
+            <div>
+              <div class="ig-locname">${esc(l)}</div>
+              <div class="ig-locchips">${[...locUnits[l]].sort().map(u=>
+                `<span class="ig-locchip"><i style="background:${UNIT_COLOR[u]||'var(--ink-muted)'}"></i>${esc(u)}</span>`).join('')}</div>
+            </div>
+            <div class="ig-loctrack"><div class="ig-locbar" style="width:${(locH[l]/locMax*100).toFixed(1)}%"
+              title="${esc(l)} · ${fmtNum(locH[l],1)} h"></div></div>
+            <div class="ig-locval">${fmtNum(locH[l],0)} h</div>
+          </div>`).join('') + `
+        </div>
+      </div>`;
+
+    host.innerHTML = html;
   }
 
   /* ---------------- Charts ---------------- */

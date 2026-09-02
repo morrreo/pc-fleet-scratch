@@ -285,6 +285,29 @@ def build(raw_a, fleet):
                 })
             rec['is_anomaly'] = bool(rec['anomalies'])
 
+        # A machine cannot run more than a calendar day inside a calendar day.
+        # Rows that each look reasonable alone can still add up to an impossible
+        # day, so this is checked on the day total rather than per row.
+        per_day = defaultdict(list)
+        for rec in recs:
+            per_day[rec['date']].append(rec)
+        for date, drecs in per_day.items():
+            total = sum(x['hours'] for x in drecs)
+            if total > MAX_SHIFT_HOURS and len(drecs) > 1:
+                # Flag once, on the last row of the day, so one problem is one alert.
+                target = sorted(drecs, key=lambda x: x['hm_start'] if x['hm_start'] is not None else 0)[-1]
+                shifts = ', '.join(sorted(set(x['shift'] for x in drecs if x['shift']))) or 'unlabelled'
+                target['anomalies'].append({
+                    'code': 'impossible_day',
+                    'severity': 'alert',
+                    'title': '%s h logged in a single day' % fmt_h(total),
+                    'msg': '%d shift rows on this date total %s h for one machine, more '
+                           'than the day holds (shift labels: %s). Check whether a row is '
+                           'duplicated or belongs to another date.'
+                           % (len(drecs), fmt_h(total), shifts),
+                })
+                target['is_anomaly'] = True
+
     units = {}
     for kode, recs in byunit.items():
         if not kode:

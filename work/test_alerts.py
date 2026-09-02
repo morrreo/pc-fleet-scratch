@@ -95,6 +95,44 @@ b = build([
 r2 = [r for r in b['records'] if r['date'] == '2026-08-02'][0]
 check('meter going backwards flags hm_backwards', 'hm_backwards' in codes(r2), str(codes(r2)))
 
+# ---- two rows on one date that each look fine but cannot both be true -------
+b = build([
+    row(i='1', Tanggal='8/1/2026', **{'Nama Operator': 'Budi', 'Tipe PC': 'SY 75',
+        'Kode PC': 'SY-75-X1', 'HM Awal': '9170', 'HM Akhir': '9188', 'Total jam': '18',
+        'Shift Operator': '2 shift'}),
+    row(i='2', Tanggal='8/1/2026', **{'Nama Operator': 'Budi', 'Tipe PC': 'SY 75',
+        'Kode PC': 'SY-75-X1', 'HM Awal': '9188', 'HM Akhir': '9204', 'Total jam': '16',
+        'Shift Operator': '2 shift'}),
+], [fleet_row('SY-75-X1', 'Budi')])
+flagged = [r for r in b['records'] if 'impossible_day' in codes(r)]
+check('18 h + 16 h on one date flags impossible_day', len(flagged) == 1,
+      str([(r['date'], codes(r)) for r in b['records']]))
+check('neither 18 h nor 16 h row trips impossible_shift on its own',
+      not any('impossible_shift' in codes(r) for r in b['records']))
+if flagged:
+    print('        msg: ' + [a for a in flagged[0]['anomalies']
+                             if a['code'] == 'impossible_day'][0]['msg'])
+
+# ---- one long row is reported once, not twice -------------------------------
+b = build([
+    row(i='1', Tanggal='8/1/2026', **{'Nama Operator': 'Budi', 'Tipe PC': 'SY 75',
+        'Kode PC': 'SY-75-X1', 'HM Awal': '9180', 'HM Akhir': '9420', 'Total jam': '240'}),
+], [fleet_row('SY-75-X1', 'Budi')])
+check('a single over-long row is not double-reported as impossible_day',
+      codes(b['records'][0]).count('impossible_shift') == 1
+      and 'impossible_day' not in codes(b['records'][0]), str(codes(b['records'][0])))
+
+# ---- two normal shifts in one day stay silent -------------------------------
+b = build([
+    row(i='1', Tanggal='8/1/2026', **{'Nama Operator': 'Budi', 'Tipe PC': 'SY 75',
+        'Kode PC': 'SY-75-X1', 'HM Awal': '9170', 'HM Akhir': '9180', 'Total jam': '10'}),
+    row(i='2', Tanggal='8/1/2026', **{'Nama Operator': 'Budi', 'Tipe PC': 'SY 75',
+        'Kode PC': 'SY-75-X1', 'HM Awal': '9180', 'HM Akhir': '9190', 'Total jam': '10'}),
+], [fleet_row('SY-75-X1', 'Budi')])
+check('two normal shifts totalling 20 h in a day stay silent',
+      not any(r['is_anomaly'] for r in b['records']),
+      str([(r['date'], codes(r)) for r in b['records']]))
+
 # ---- a clean log must stay silent (no false alarms) -------------------------
 b = build([
     row(i='1', Tanggal='8/1/2026', **{'Nama Operator': 'Budi', 'Tipe PC': 'SY 75',
