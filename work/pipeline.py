@@ -177,10 +177,14 @@ def build(raw_a, fleet):
     for rec in records:
         byunit[rec['kode_pc']].append(rec)
 
-    for recs in byunit.values():
+    for kode, recs in byunit.items():
+        # Walk the log in DATE order. Sorting by hm_start instead lets a mistyped
+        # reading sort into the wrong place, which flags its innocent neighbours
+        # and hides the entry that is actually wrong.
+        registered = by_kode.get(kode, {}).get('Operator BERJALAN', '').strip().lower()
         prev_end = None
         for rec in sorted([x for x in recs if x['hm_start'] is not None],
-                          key=lambda x: x['hm_start']):
+                          key=lambda x: x['date']):
             if prev_end is not None and abs(rec['hm_start'] - prev_end) > 5:
                 rec['anomalies'].append('hm_discontinuity')
             if rec['hm_end'] is not None:
@@ -190,14 +194,25 @@ def build(raw_a, fleet):
                 rec['anomalies'].append('improbable_duration')
             if rec['hours'] < 0:
                 rec['anomalies'].append('negative_hours')
+            # A shift logged against a unit by someone other than its running
+            # operator is usually the wrong unit picked on the form.
+            if registered and rec['operator'].strip().lower() != registered:
+                rec['anomalies'].append('operator_mismatch')
             rec['is_anomaly'] = bool(rec['anomalies'])
 
     units = {}
     for kode, recs in byunit.items():
         if not kode:
             continue
-        hms = [x for r_ in recs for x in (r_['hm_start'], r_['hm_end']) if x is not None]
-        current_hm = max(hms) if hms else 0
+        # The hour meter is whatever the most recent shift closed at. Using max()
+        # instead lets one mistyped high reading inflate the unit's HM permanently.
+        dated = sorted([r_ for r_ in recs if r_['hm_end'] is not None],
+                       key=lambda r_: r_['date'])
+        if dated:
+            current_hm = dated[-1]['hm_end']
+        else:
+            hms = [x for r_ in recs for x in (r_['hm_start'], r_['hm_end']) if x is not None]
+            current_hm = max(hms) if hms else 0
         svc = [r_ for r_ in recs if r_['is_service']]
         svc_hms = [x for r_ in svc for x in (r_['hm_start'], r_['hm_end']) if x is not None]
         if svc_hms:

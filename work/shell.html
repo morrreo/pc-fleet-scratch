@@ -388,6 +388,13 @@ function unitSetting(kode){
   }
   return SETTINGS.units[kode];
 }
+/* A unit whose last service HM was never logged, and never corrected by hand,
+   sits at "0 h since service". That is an absence of data, not a fresh service,
+   so it must not read as OK. */
+function serviceHmUnknown(kode){
+  const info = BUNDLE.units[kode];
+  return !info.service_hm_known && unitSetting(kode).lastServiceHm === info.last_service_hm;
+}
 function operatorSetting(name){
   if(!SETTINGS.operators[name]){
     SETTINGS.operators[name] = { paydayCycleDays: 14, lastPaydayDate: BUNDLE.meta.date_min };
@@ -488,17 +495,19 @@ class Dashboard{
     const anomalies = f.filter(r=>r.is_anomaly).length;
     const unitsInScope = document.getElementById('f-unit').value==='all' ? Object.keys(this.b.units) : [document.getElementById('f-unit').value];
     const dueService = unitsInScope.filter(u=>{
+      if(serviceHmUnknown(u)) return false;
       const s = unitSetting(u); const cur = this.b.units[u].current_hm;
       return (cur - s.lastServiceHm) >= s.threshold;
     }).length;
+    const svcUnknownCount = unitsInScope.filter(serviceHmUnknown).length;
 
     const cards = [
       {lbl:'Hours Worked', val: fmtNum(hours,1)+' h', sub:`${f.length} shift entries`},
       {lbl:'Est. Client Billing', val: fmtIDR(billing), sub: fmtIDRfull(billing)},
       {lbl:'Est. Operator Payroll', val: fmtIDR(wage), sub: fmtIDRfull(wage)},
       {lbl:'Problems Reported', val: problems, sub: problems? 'needs a look' : 'all clear', cls: problems?'alert':''},
-      {lbl:'Data Checks Needed', val: anomalies, sub: anomalies? 'HM entries to verify':'log looks clean', cls: anomalies?'warnval':''},
-      {lbl:'Units Due for Service', val: dueService, sub: `of ${unitsInScope.length} in view`, cls: dueService?'alert':''},
+      {lbl:'Data Checks Needed', val: anomalies, sub: anomalies? 'entries to verify in the sheet':'log looks clean', cls: anomalies?'warnval':''},
+      {lbl:'Units Due for Service', val: dueService, sub: svcUnknownCount ? `${svcUnknownCount} of ${unitsInScope.length} have no service HM on record` : `of ${unitsInScope.length} in view`, cls: dueService?'alert':(svcUnknownCount?'warnval':'')},
     ];
     document.getElementById('kpi-row').innerHTML = cards.map(c=>`
       <div class="kpi ${c.cls||''}">
@@ -515,11 +524,13 @@ class Dashboard{
     document.getElementById('fleet-row').innerHTML = units.map(u=>{
       const info = this.b.units[u];
       const s = unitSetting(u);
+      const svcUnknown = serviceHmUnknown(u);
       const since = info.current_hm - s.lastServiceHm;
-      const pct = Math.min(100, Math.max(0,(since / s.threshold)*100));
+      const pct = svcUnknown ? 0 : Math.min(100, Math.max(0,(since / s.threshold)*100));
       const overdueBy = since - s.threshold;
       let status, chipClass;
-      if(since >= s.threshold){ status = overdueBy>=25 ? 'Overdue' : 'Service Due'; chipClass='crit'; }
+      if(svcUnknown){ status='Service HM unknown'; chipClass='warn'; }
+      else if(since >= s.threshold){ status = overdueBy>=25 ? 'Overdue' : 'Service Due'; chipClass='crit'; }
       else if(since >= s.threshold*0.8){ status='Due Soon'; chipClass='warn'; }
       else { status='OK'; chipClass='good'; }
       const barColor = chipClass==='crit'?'var(--critical)':chipClass==='warn'?'var(--warn)':'var(--good)';
@@ -533,11 +544,11 @@ class Dashboard{
           <span class="chip ${chipClass}">${status}</span>
         </div>
         <div class="hm-row"><span>Current HM</span><b class="num">${fmtNum(info.current_hm)}</b></div>
-        <div class="hm-row"><span>Since last service</span><b class="num">${fmtNum(since,0)} h / ${s.threshold} h</b></div>
+        <div class="hm-row"><span>Since last service</span><b class="num">${svcUnknown ? '—' : fmtNum(since,0)+' h'} / ${s.threshold} h</b></div>
         <div class="bar-track"><div class="bar-fill" style="width:${pct}%;background:${barColor}"></div></div>
         ${knownNote}
         <div class="u-meta">
-          <span>Operator now: <b>${info.operator_berjalan}</b></span>
+          <span>Operator now: <b>${info.operator_current || '—'}</b></span>
           <span>Logged this window: ${fmtNum(info.total_hours_logged,1)} h</span>
         </div>
         <div class="u-controls">
@@ -717,7 +728,7 @@ class Dashboard{
     // fuel per shift by unit
     const fuelDatasets = unitsPresent.map(u=>({
       label:u,
-      data: dates.map(d=> f.filter(r=>r.date===d && r.kode_pc===u).reduce((s,r)=>s+(r.fuel_used||0),0)),
+      data: dates.map(d=> f.filter(r=>r.date===d && r.kode_pc===u).reduce((s,r)=>s+(r.fuel_qty||0),0)),
       borderColor: resolveColor(UNIT_COLOR[u]), backgroundColor: resolveColor(UNIT_COLOR[u])+'33',
       borderWidth:2, tension:.25, pointRadius:2, spanGaps:true
     }));
