@@ -125,13 +125,52 @@ check('a single over-long row is not double-reported as impossible_day',
 # ---- two normal shifts in one day stay silent -------------------------------
 b = build([
     row(i='1', Tanggal='8/1/2026', **{'Nama Operator': 'Budi', 'Tipe PC': 'SY 75',
+        'Kode PC': 'SY-75-X1', 'HM Awal': '9170', 'HM Akhir': '9180', 'Total jam': '10',
+        'Shift Operator': '1 shift'}),
+    row(i='2', Tanggal='8/1/2026', **{'Nama Operator': 'Budi', 'Tipe PC': 'SY 75',
+        'Kode PC': 'SY-75-X1', 'HM Awal': '9180', 'HM Akhir': '9190', 'Total jam': '10',
+        'Shift Operator': '2 shift'}),
+], [fleet_row('SY-75-X1', 'Budi')])
+check('a day and a night shift totalling 20 h stay silent',
+      not any(r['is_anomaly'] for r in b['records']),
+      str([(r['date'], codes(r)) for r in b['records']]))
+
+# ---- same shift label twice in a day, but a believable total ----------------
+b = build([
+    row(i='1', Tanggal='8/1/2026', **{'Nama Operator': 'Budi', 'Tipe PC': 'SY 75',
+        'Kode PC': 'SY-75-X1', 'HM Awal': '9170', 'HM Akhir': '9180', 'Total jam': '10',
+        'Shift Operator': '1 shift'}),
+    row(i='2', Tanggal='8/1/2026', **{'Nama Operator': 'Budi', 'Tipe PC': 'SY 75',
+        'Kode PC': 'SY-75-X1', 'HM Awal': '9180', 'HM Akhir': '9188', 'Total jam': '8',
+        'Shift Operator': '1 shift'}),
+], [fleet_row('SY-75-X1', 'Budi')])
+dupes = [r for r in b['records'] if 'duplicate_entry' in codes(r)]
+check('the same shift label filed twice flags duplicate_entry', len(dupes) == 1,
+      str([(r['date'], codes(r)) for r in b['records']]))
+
+# ---- unlabelled rows are not duplicates -------------------------------------
+b = build([
+    row(i='1', Tanggal='8/1/2026', **{'Nama Operator': 'Budi', 'Tipe PC': 'SY 75',
         'Kode PC': 'SY-75-X1', 'HM Awal': '9170', 'HM Akhir': '9180', 'Total jam': '10'}),
     row(i='2', Tanggal='8/1/2026', **{'Nama Operator': 'Budi', 'Tipe PC': 'SY 75',
         'Kode PC': 'SY-75-X1', 'HM Awal': '9180', 'HM Akhir': '9190', 'Total jam': '10'}),
 ], [fleet_row('SY-75-X1', 'Budi')])
-check('two normal shifts totalling 20 h in a day stay silent',
-      not any(r['is_anomaly'] for r in b['records']),
+check('two rows with no shift label are not called duplicates',
+      not any('duplicate_entry' in codes(r) for r in b['records']),
       str([(r['date'], codes(r)) for r in b['records']]))
+
+# ---- reported problems are recorded but never counted as data anomalies -----
+b = build([
+    row(i='1', Tanggal='8/1/2026', **{'Nama Operator': 'Budi', 'Tipe PC': 'SY 75',
+        'Kode PC': 'SY-75-X1', 'HM Awal': '9170', 'HM Akhir': '9180', 'Total jam': '10',
+        'Catatan Tambahan / Keterangan': 'Selang hos pecah, tunggu mekanik'}),
+], [fleet_row('SY-75-X1', 'Budi')])
+r1 = b['records'][0]
+check('a breakdown note sets is_problem', r1['is_problem'])
+check('and captures the words that matched',
+      set(r1['problem_terms']) >= {'pecah', 'selang hos'}, str(r1['problem_terms']))
+check('but does NOT set is_anomaly (its hours still bill)',
+      not r1['is_anomaly'] and r1['hours'] == 10, str(codes(r1)))
 
 # ---- a clean log must stay silent (no false alarms) -------------------------
 b = build([

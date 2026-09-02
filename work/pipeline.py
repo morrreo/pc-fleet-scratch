@@ -169,6 +169,9 @@ def build(raw_a, fleet):
         notes = r['Catatan Tambahan / Keterangan'].strip()
         blob = (job + ' ' + notes).lower()
         unit = by_kode.get(kode, {})
+        # Keep the words that matched, so an alert can say what was reported
+        # rather than just that something was.
+        problem_terms = sorted({w for w in PROBLEM_WORDS if w in blob})
 
         records.append({
             'submitted': r['i'].strip(), 'date': date, 'operator': operator,
@@ -184,7 +187,7 @@ def build(raw_a, fleet):
             'hm_start': hm_start, 'hm_end': hm_end, 'hours': hours,
             'rate_per_hour': rate, 'billing_idr': hours * rate,
             'wage_idr': hours * WAGE_PER_HOUR,
-            'is_problem': any(w in blob for w in PROBLEM_WORDS),
+            'is_problem': bool(problem_terms), 'problem_terms': problem_terms,
             'is_service': any(p.search(blob) for p in SERVICE_RE),
             'anomalies': [], 'is_anomaly': False,
         })
@@ -293,7 +296,30 @@ def build(raw_a, fleet):
             per_day[rec['date']].append(rec)
         for date, drecs in per_day.items():
             total = sum(x['hours'] for x in drecs)
-            if total > MAX_SHIFT_HOURS and len(drecs) > 1:
+            impossible = total > MAX_SHIFT_HOURS and len(drecs) > 1
+            if not impossible:
+                # Same machine, same date, same shift label, filed more than once.
+                # (When the day is already impossible, that says it better.)
+                by_shift = defaultdict(list)
+                for x in drecs:
+                    label = x['shift'].strip().lower()
+                    if label:  # two unlabelled rows are not evidence of a duplicate
+                        by_shift[label].append(x)
+                for shift, srecs in by_shift.items():
+                    if len(srecs) < 2:
+                        continue
+                    target = sorted(srecs, key=lambda x: x['hm_start']
+                                    if x['hm_start'] is not None else 0)[-1]
+                    target['anomalies'].append({
+                        'code': 'duplicate_entry',
+                        'severity': 'alert',
+                        'title': 'Same shift filed %d times' % len(srecs),
+                        'msg': '%d rows share this machine, date and shift label (%s). '
+                               'One is probably a duplicate submission.'
+                               % (len(srecs), srecs[0]['shift'] or 'unlabelled'),
+                    })
+                    target['is_anomaly'] = True
+            if impossible:
                 # Flag once, on the last row of the day, so one problem is one alert.
                 target = sorted(drecs, key=lambda x: x['hm_start'] if x['hm_start'] is not None else 0)[-1]
                 shifts = ', '.join(sorted(set(x['shift'] for x in drecs if x['shift']))) or 'unlabelled'
