@@ -10,6 +10,12 @@ from collections import defaultdict
 RATE_BY_TIPE = {'75': 450000, '200': 800000}
 WAGE_PER_HOUR = 40000
 
+# Shape of the data this script hands the page. Bump it whenever the bundle's
+# structure changes, and bump BUNDLE_SCHEMA in the page to match. The page checks
+# the two agree and says so loudly if they don't — an older pipeline splicing into
+# a newer page used to fail silently, publishing blank alert cards.
+SCHEMA = 2
+
 # A shift cannot outlast a calendar day. The longest real shift in the log so far
 # is 22 h, so 24 leaves headroom without swallowing a genuine 240 h typo.
 MAX_SHIFT_HOURS = 24
@@ -407,6 +413,7 @@ def build(raw_a, fleet):
         'records': records, 'units': units, 'operators': ops, 'daily': daily,
         'generated_at': datetime.date.today().isoformat(),
         'meta': {
+            'schema': SCHEMA,
             'data_source': 'LAPORAN PC (Google Sheet) — "Laporan PC Form" tab',
             'date_min': dates[0] if dates else None,
             'date_max': dates[-1] if dates else None,
