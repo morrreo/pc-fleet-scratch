@@ -407,6 +407,7 @@ def build(raw_a, fleet):
         'records': records, 'units': units, 'operators': ops, 'daily': daily,
         'generated_at': datetime.date.today().isoformat(),
         'meta': {
+            'schema': 2,
             'data_source': 'LAPORAN PC (Google Sheet) — "Laporan PC Form" tab',
             'date_min': dates[0] if dates else None,
             'date_max': dates[-1] if dates else None,
