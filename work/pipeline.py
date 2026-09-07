@@ -10,6 +10,22 @@ from collections import defaultdict
 RATE_BY_TIPE = {'75': 450000, '200': 800000}
 WAGE_PER_HOUR = 40000
 
+# A shift cannot outlast a calendar day. The longest real shift in the log so far
+# is 22 h, so 24 leaves headroom without swallowing a genuine 240 h typo.
+MAX_SHIFT_HOURS = 24
+# Consecutive shifts on a healthy unit close and open on the exact same reading
+# (83 of 91 transitions do). Anything above this is a real gap, not rounding.
+HM_GAP_SLACK = 0
+# Below this a forward gap is a stray hour rather than a whole missing shift.
+HM_GAP_ALERT = 2
+
+
+def fmt_h(v):
+    """Render an hour count without a pointless trailing .0."""
+    if isinstance(v, float) and v == int(v):
+        v = int(v)
+    return '{:,}'.format(v)
+
 PROBLEM_WORDS = ['rusak', 'pecah', 'putus', 'bocor', 'trouble', 'ambles', 'amblas', 'macet',
                  'patah', 'error', 'gagal', 'mogok', 'tunggu', 'nyalep', 'selang hos', 'vanbelt',
                  'terjebak', 'anjlok', 'terguling', 'tergelincir', 'hilang', 'hancur',
@@ -153,6 +169,9 @@ def build(raw_a, fleet):
         notes = r['Catatan Tambahan / Keterangan'].strip()
         blob = (job + ' ' + notes).lower()
         unit = by_kode.get(kode, {})
+        # Keep the words that matched, so an alert can say what was reported
+        # rather than just that something was.
+        problem_terms = sorted({w for w in PROBLEM_WORDS if w in blob})
 
         records.append({
             'submitted': r['i'].strip(), 'date': date, 'operator': operator,
@@ -168,7 +187,7 @@ def build(raw_a, fleet):
             'hm_start': hm_start, 'hm_end': hm_end, 'hours': hours,
             'rate_per_hour': rate, 'billing_idr': hours * rate,
             'wage_idr': hours * WAGE_PER_HOUR,
-            'is_problem': any(w in blob for w in PROBLEM_WORDS),
+            'is_problem': bool(problem_terms), 'problem_terms': problem_terms,
             'is_service': any(p.search(blob) for p in SERVICE_RE),
             'anomalies': [], 'is_anomaly': False,
         })
@@ -177,27 +196,157 @@ def build(raw_a, fleet):
     for rec in records:
         byunit[rec['kode_pc']].append(rec)
 
-    for recs in byunit.values():
-        prev_end = None
+    for kode, recs in byunit.items():
+        reg_name = by_kode.get(kode, {}).get('Operator BERJALAN', '').strip()
+        registered = reg_name.lower()
+
+        # Walk the log in DATE order. Sorting by hm_start instead lets a mistyped
+        # reading sort into the wrong place, which flags its innocent neighbours
+        # and hides the entry that is actually wrong.
+        prev = None
         for rec in sorted([x for x in recs if x['hm_start'] is not None],
-                          key=lambda x: x['hm_start']):
-            if prev_end is not None and abs(rec['hm_start'] - prev_end) > 5:
-                rec['anomalies'].append('hm_discontinuity')
+                          key=lambda x: x['date']):
+            if prev is not None:
+                gap = rec['hm_start'] - prev['hm_end']
+                if gap > HM_GAP_SLACK:
+                    # The meter ran while nobody filed a report for it.
+                    rec['anomalies'].append({
+                        'code': 'missing_report',
+                        'severity': 'alert' if gap > HM_GAP_ALERT else 'info',
+                        'hours': gap,
+                        'ref_date': prev['date'],
+                        'title': '%s h missing between shifts' % fmt_h(gap),
+                        # {d} is filled in by the page so dates format one way only.
+                        'msg': '{d} closed at HM %s, but this shift opens at HM %s. '
+                               'Those %s h ran with no report filed.'
+                               % (fmt_h(prev['hm_end']), fmt_h(rec['hm_start']), fmt_h(gap)),
+                    })
+                elif gap < -HM_GAP_SLACK:
+                    # An hour meter only counts up, so this is a typo or wrong unit.
+                    rec['anomalies'].append({
+                        'code': 'hm_backwards',
+                        'severity': 'alert',
+                        'ref_date': prev['date'],
+                        'title': 'Meter went backwards %s h' % fmt_h(-gap),
+                        'msg': 'This shift opens at HM %s, below the HM %s that {d} '
+                               'closed at. An hour meter cannot count down — check for a '
+                               'mistyped digit or the wrong unit on the form.'
+                               % (fmt_h(rec['hm_start']), fmt_h(prev['hm_end'])),
+                    })
             if rec['hm_end'] is not None:
-                prev_end = rec['hm_end']
+                prev = rec
+
         for rec in recs:
-            if rec['hours'] > 24:
-                rec['anomalies'].append('improbable_duration')
-            if rec['hours'] < 0:
-                rec['anomalies'].append('negative_hours')
+            span = None
+            if rec['hm_start'] is not None and rec['hm_end'] is not None:
+                span = rec['hm_end'] - rec['hm_start']
+            longest = max(rec['hours'], span) if span is not None else rec['hours']
+
+            if longest > MAX_SHIFT_HOURS:
+                rec['anomalies'].append({
+                    'code': 'impossible_shift',
+                    'severity': 'alert',
+                    'title': '%s h in a single shift' % fmt_h(longest),
+                    'msg': '%s h is longer than a calendar day. An excavator cannot run '
+                           'this long unbroken — the start or end reading is almost '
+                           'certainly mistyped.' % fmt_h(longest),
+                })
+            if span is not None and span < 0:
+                rec['anomalies'].append({
+                    'code': 'negative_shift',
+                    'severity': 'alert',
+                    'title': 'Shift ends below its own start',
+                    'msg': 'Closes at HM %s but opened at HM %s.'
+                           % (fmt_h(rec['hm_end']), fmt_h(rec['hm_start'])),
+                })
+            elif rec['hours'] < 0:
+                rec['anomalies'].append({
+                    'code': 'negative_shift',
+                    'severity': 'alert',
+                    'title': 'Negative hours reported',
+                    'msg': 'Reported total is %s h.' % fmt_h(rec['hours']),
+                })
+            if span is not None and abs(span - rec['hours']) > 0.5:
+                rec['anomalies'].append({
+                    'code': 'hours_mismatch',
+                    'severity': 'alert',
+                    'title': 'Reported hours disagree with the meter',
+                    'msg': 'Reported %s h, but the meter moved %s h (HM %s → %s).'
+                           % (fmt_h(rec['hours']), fmt_h(span),
+                              fmt_h(rec['hm_start']), fmt_h(rec['hm_end'])),
+                })
+            # A shift logged against a unit by someone other than its running
+            # operator is usually the wrong unit picked on the form.
+            if registered and rec['operator'].strip().lower() != registered:
+                rec['anomalies'].append({
+                    'code': 'operator_mismatch',
+                    'severity': 'alert',
+                    'title': 'Logged by a different operator',
+                    'msg': 'Filed by %s, but %s is the running operator for this unit. '
+                           'The wrong unit may have been picked on the form.'
+                           % (rec['operator'] or '—', reg_name or '—'),
+                })
             rec['is_anomaly'] = bool(rec['anomalies'])
+
+        # A machine cannot run more than a calendar day inside a calendar day.
+        # Rows that each look reasonable alone can still add up to an impossible
+        # day, so this is checked on the day total rather than per row.
+        per_day = defaultdict(list)
+        for rec in recs:
+            per_day[rec['date']].append(rec)
+        for date, drecs in per_day.items():
+            total = sum(x['hours'] for x in drecs)
+            impossible = total > MAX_SHIFT_HOURS and len(drecs) > 1
+            if not impossible:
+                # Same machine, same date, same shift label, filed more than once.
+                # (When the day is already impossible, that says it better.)
+                by_shift = defaultdict(list)
+                for x in drecs:
+                    label = x['shift'].strip().lower()
+                    if label:  # two unlabelled rows are not evidence of a duplicate
+                        by_shift[label].append(x)
+                for shift, srecs in by_shift.items():
+                    if len(srecs) < 2:
+                        continue
+                    target = sorted(srecs, key=lambda x: x['hm_start']
+                                    if x['hm_start'] is not None else 0)[-1]
+                    target['anomalies'].append({
+                        'code': 'duplicate_entry',
+                        'severity': 'alert',
+                        'title': 'Same shift filed %d times' % len(srecs),
+                        'msg': '%d rows share this machine, date and shift label (%s). '
+                               'One is probably a duplicate submission.'
+                               % (len(srecs), srecs[0]['shift'] or 'unlabelled'),
+                    })
+                    target['is_anomaly'] = True
+            if impossible:
+                # Flag once, on the last row of the day, so one problem is one alert.
+                target = sorted(drecs, key=lambda x: x['hm_start'] if x['hm_start'] is not None else 0)[-1]
+                shifts = ', '.join(sorted(set(x['shift'] for x in drecs if x['shift']))) or 'unlabelled'
+                target['anomalies'].append({
+                    'code': 'impossible_day',
+                    'severity': 'alert',
+                    'title': '%s h logged in a single day' % fmt_h(total),
+                    'msg': '%d shift rows on this date total %s h for one machine, more '
+                           'than the day holds (shift labels: %s). Check whether a row is '
+                           'duplicated or belongs to another date.'
+                           % (len(drecs), fmt_h(total), shifts),
+                })
+                target['is_anomaly'] = True
 
     units = {}
     for kode, recs in byunit.items():
         if not kode:
             continue
-        hms = [x for r_ in recs for x in (r_['hm_start'], r_['hm_end']) if x is not None]
-        current_hm = max(hms) if hms else 0
+        # The hour meter is whatever the most recent shift closed at. Using max()
+        # instead lets one mistyped high reading inflate the unit's HM permanently.
+        dated = sorted([r_ for r_ in recs if r_['hm_end'] is not None],
+                       key=lambda r_: r_['date'])
+        if dated:
+            current_hm = dated[-1]['hm_end']
+        else:
+            hms = [x for r_ in recs for x in (r_['hm_start'], r_['hm_end']) if x is not None]
+            current_hm = max(hms) if hms else 0
         svc = [r_ for r_ in recs if r_['is_service']]
         svc_hms = [x for r_ in svc for x in (r_['hm_start'], r_['hm_end']) if x is not None]
         if svc_hms:
@@ -258,6 +407,7 @@ def build(raw_a, fleet):
         'records': records, 'units': units, 'operators': ops, 'daily': daily,
         'generated_at': datetime.date.today().isoformat(),
         'meta': {
+            'schema': 2,
             'data_source': 'LAPORAN PC (Google Sheet) — "Laporan PC Form" tab',
             'date_min': dates[0] if dates else None,
             'date_max': dates[-1] if dates else None,
